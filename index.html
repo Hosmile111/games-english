@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<!-- v8: 移动端无声再加固——首次手势显示解锁诊断提示（确认新版/检查静音开关/浏览器支持）；unlockSpeech 先 cancel；_acx 更健壮 (2026-08-21) -->
+<!-- v8: 移动端无声加固——微信内置浏览器一次性提示（用浏览器打开）；首次手势解锁诊断提示；unlockSpeech 先 cancel；_acx 更健壮 (2026-08-21) -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>🎮 娱乐学习</title>
@@ -786,6 +786,17 @@ function unlockAudio(){
 ['pointerdown','touchstart','mousedown','click','keydown'].forEach(function(ev){
   try{ window.addEventListener(ev, unlockAudio, {passive:true}); }catch(e){}
 });
+// 微信内置浏览器提示：XWeb 内核在部分安卓机无法发声/语音，引导用系统浏览器打开（一次性）
+try{
+  var _ua=(navigator.userAgent||'').toLowerCase();
+  if(_ua.indexOf('micromessenger')>=0 && !localStorage.getItem('ge_wx_tip_done')){
+    var _b=document.createElement('div');
+    _b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99998;background:#FF6B00;color:#fff;font-size:13px;padding:10px 14px;text-align:center;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.2)';
+    _b.innerHTML='⚠️ 微信内可能无法发声/发音：点右上角「···」→「用浏览器打开」';
+    _b.onclick=function(){ _b.remove(); try{ localStorage.setItem('ge_wx_tip_done','1'); }catch(e){} };
+    document.body.appendChild(_b);
+  }
+}catch(e){}
 function _speak(text, lang){
   if(_sfxMuted || !('speechSynthesis' in window) || !text) return;
   var ss=window.speechSynthesis;
