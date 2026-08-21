@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<!-- v6: 跨设备登录——本机无账号时走云端验证并建本地账号拉数据；后端放宽 uid 正则允许邮箱式账号名 (2026-08-21) -->
+<!-- v7: 修复移动端无声——多种手势持续 resume AudioContext/speechSynthesis（iOS/Android 自动播放策略）；_speak 先 cancel 再 speak 且不等voices (2026-08-21) -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>🎮 娱乐学习</title>
@@ -764,22 +764,23 @@ if('speechSynthesis' in window){
   try{ window.speechSynthesis.onvoiceschanged=function(){ _loadVoices(); }; }catch(e){}
   setTimeout(_loadVoices,300); setTimeout(_loadVoices,1200);
 }
-(function(){ if(!('speechSynthesis' in window)) return; var done=false;
-  function f(){ if(done) return; done=true; unlockSpeech(); }
-  try{ window.addEventListener('pointerdown',f,{once:true}); window.addEventListener('keydown',f,{once:true}); }catch(e){}
-})();
+// 移动端音频解锁：iOS/Android 要求在“用户手势内”创建并 resume AudioContext / speechSynthesis，
+// 且上下文会被系统反复挂起。故在多种手势上持续 resume（每次交互即唤醒），而非只解锁一次。
+function unlockAudio(){ _acx(); unlockSpeech(); }
+['pointerdown','touchstart','mousedown','click','keydown'].forEach(function(ev){
+  try{ window.addEventListener(ev, unlockAudio, {passive:true}); }catch(e){}
+});
 function _speak(text, lang){
   if(_sfxMuted || !('speechSynthesis' in window) || !text) return;
   var ss=window.speechSynthesis;
   try{ ss.resume(); }catch(e){}
   if(!_voicesReady){ _loadVoices(); }
-  if(!_voicesReady){
-    try{ window.speechSynthesis.addEventListener('voiceschanged', function once(){ try{window.speechSynthesis.removeEventListener('voiceschanged',once);}catch(e){} _speak(text,lang); }, {once:true}); return; }catch(e){}
-  }
   var u=new SpeechSynthesisUtterance(text);
   u.lang=lang||'zh-CN'; u.rate=lang==='en-US'?0.9:1.05; u.pitch=1; u.volume=1;
   var v = lang==='en-US' ? _pickVoice(_enVoices,['en-US','en-GB','^en']) : _pickVoice(_zhVoices,['^zh-CN','zh','Chinese']);
   if(v) u.voice=v;
+  // iOS：先 cancel 再 speak 更稳；不等待 voices（避免丢失用户手势时机导致完全不发音）
+  try{ ss.cancel(); }catch(e){}
   ss.speak(u);
 }
 function _sfxExplode(){
