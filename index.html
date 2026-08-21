@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+<!-- v5: 允许邮箱式账号名注册/登录 (youlook@qq.com 等)；云同步 fetch 加 10s 超时防卡死 (2026-08-21) -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>🎮 娱乐学习</title>
@@ -1504,7 +1505,7 @@ function authSwitch(mode){
     document.getElementById('authTitle').textContent = userCount ? '📝 注册新账号' : '📝 注册首个管理员账号';
     document.getElementById('authSubtitle').textContent = userCount ? '需要管理员生成的 6 位数字邀请码' : '你将自动成为管理员（首位注册）';
     body.innerHTML =
-      '<label class="fld">账号（3-20字符，字母+数字自由组合）</label>'+
+      '<label class="fld">账号（3-64字符，支持字母/数字/邮箱，可用 . _ @ -）</label>'+
       '<input id="regU" class="auth-input" autocomplete="username" placeholder="如 alice2024">'+
       '<label class="fld">密码（≥4位）</label>'+
       '<input id="regP" class="auth-input" type="password" autocomplete="new-password" placeholder="设置密码">'+
@@ -1644,7 +1645,7 @@ function authDoRegister(){
   var p=((document.getElementById('regP')||{}).value||'');
   var p2=((document.getElementById('regP2')||{}).value||'');
   var inv=((document.getElementById('regI')||{}).value||'').trim().toUpperCase();
-  if(!/^[A-Za-z0-9]{3,20}$/.test(u)){ toast('账号需 3-20 字符（字母/数字自由组合）'); return; }
+  if(!/^[A-Za-z0-9._@-]{3,64}$/.test(u)){ toast('账号需 3-64 字符（字母/数字/邮箱，支持 . _ @ -）'); return; }
   if(p.length<4){ toast('密码至少 4 位'); return; }
   if(p!==p2){ toast('两次密码不一致'); return; }
   var s = authLoad();
@@ -1759,7 +1760,12 @@ async function _geFetchFn(path, body){
   try{
     var opts = { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' } };
     if(body) opts.body = JSON.stringify(body);
+    // 10s 超时：云同步不可达时快速失败，绝不卡死登录/UI
+    var ctrl = new AbortController();
+    var _tid = setTimeout(function(){ try{ ctrl.abort(); }catch(e){} }, 10000);
+    opts.signal = ctrl.signal;
     var r = await fetch(GE_CLOUD_FN + path, opts);
+    clearTimeout(_tid);
     var j; try{ j = await r.json(); }catch(e){ j = {}; }
     return j;
   }catch(e){ return null; }
