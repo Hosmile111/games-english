@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<!-- v9: 移动端无声深度修复——HTMLAudio WAV 兜底发声 + 首手势双通道解锁 + 「🔊 测试声音」自检按钮（含 WebAudio 状态/音效/语音三合一诊断）(2026-08-21) -->
+<!-- v10: 声音自检升级为持久弹窗，逐项显示 WebAudio/音效/TTS/HTMLAudio/浏览器UA，便于精确定位无声环节 (2026-08-21) -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>🎮 娱乐学习</title>
@@ -816,15 +816,26 @@ function _wavUri(freq, dur){
 function _htmlAudioPlay(uri, vol){
   try{ if(!uri) return; var a=new Audio(uri); if(vol!=null) a.volume=vol; var p=a.play(); if(p&&p.catch) p.catch(function(){}); }catch(e){}
 }
-/* ---- 声音自检按钮：直观告诉用户音效/语音是否可播，哪个环节断 ---- */
+/* ---- 声音自检：持久弹窗，逐项显示浏览器音频能力，便于定位 ---- */
 function testSound(){
-  var ac=_acx(), st=ac?ac.state:'不可用', msgs=['🔊 WebAudio:'+st];
-  try{ _sfxBeep(880); msgs.push('音效✓'); }catch(e){ msgs.push('音效✗'); }
-  if('speechSynthesis' in window){ try{ _speak('hello','en-US'); msgs.push('语音✓'); }catch(e){ msgs.push('语音✗'); } }
-  else { msgs.push('语音:不支持'); }
-  toast(msgs.join(' | '));
-  // 额外尝试 HTMLAudio 发声，覆盖 Web Audio 被拦的场景
-  _htmlAudioPlay(_wavUri(880,0.2),0.8);
+  var ac=_acx(), acOk=!!ac, acSt=ac?ac.state:'不可用';
+  var beepOk=false, ttsOk=null, htmlOk=false;
+  try{ _sfxBeep(880); beepOk=true; }catch(e){}
+  try{ _htmlAudioPlay(_wavUri(660,0.25),0.8); htmlOk=true; }catch(e){}
+  var tts=('speechSynthesis' in window);
+  if(tts){ try{ _speak('hello','en-US'); ttsOk=true; }catch(e){ ttsOk=false; } }
+  var ua=''; try{ ua=navigator.userAgent||''; if(ua.length>90) ua=ua.slice(0,90)+'…'; }catch(e){}
+  gm(
+    '<div class="gm-head"><div class="gm-title">🔊 声音自检</div><button class="gm-close" onclick="closeGm()">✕</button></div>'+
+    '<div style="font-size:14px;line-height:2">'+
+      '<div>• 网页音频 WebAudio：'+(acOk?(acSt==='running'?'✅ '+acSt:'⚠️ '+acSt):'❌ 不可用')+'</div>'+
+      '<div>• 音效播放：'+(beepOk?'✅ 已触发':'❌ 失败')+'</div>'+
+      '<div>• 语音合成 TTS：'+(tts?(ttsOk?'✅ 已触发':'⚠️ 已触发(听不到?)'):'❌ 不支持')+'</div>'+
+      '<div>• HTMLAudio 兜底：'+(htmlOk?'✅ 已触发':'❌ 失败')+'</div>'+
+      '<div style="font-size:12px;color:#888;word-break:break-all">• 浏览器：'+ua+'</div>'+
+    '</div>'+
+    '<p style="font-size:13px;color:#666;margin-top:12px;line-height:1.7">✅/已触发但仍无声 → 检查手机<b>媒体音量</b>（非铃声）、蓝牙耳机、静音模式；或用手机放段视频确认能否出声。<br>❌ 不支持 → 浏览器过旧/受限，请更新或换 Chrome 打开，或在电脑上使用。</p>'
+  );
 }
 try{
   var _tb=document.createElement('div');
