@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<!-- v5: 允许邮箱式账号名注册/登录 (youlook@qq.com 等)；云同步 fetch 加 10s 超时防卡死 (2026-08-21) -->
+<!-- v6: 跨设备登录——本机无账号时走云端验证并建本地账号拉数据；后端放宽 uid 正则允许邮箱式账号名 (2026-08-21) -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>🎮 娱乐学习</title>
@@ -1411,8 +1411,12 @@ function authShow(){
     document.getElementById('adminBtn').style.display = _currentRole==='admin' ? 'inline-block' : 'none';
     // 启动手机端轮询：检测是否有电脑端等待授权
     _startMobileAuthPoll();
-    // 会话恢复：有云端 token 则自动拉取并开启实时同步（无 token 时保持本地模式）
-    if(localStorage.getItem('ge_' + _currentUser + '_cloudtoken')){ geSyncInit(); }
+    // 会话恢复：有云端 token 则自动拉取并开启实时同步；
+    // 本机有账号但云端未连通（旧账号未推送过）则用缓存的云密码哈希自动启用同步，无需重新登录
+    var _ct = localStorage.getItem('ge_' + _currentUser + '_cloudtoken');
+    var _cp = localStorage.getItem('ge_' + _currentUser + '_cloudpass');
+    if(_ct){ geSyncInit(); }
+    else if(_cp){ geSyncInitCp(_cp); }
   }else{
     _currentUser=null; _currentRole='user';
     document.getElementById('authMask').style.display='flex';
@@ -1670,18 +1674,42 @@ function authDoRegister(){
   // 自动开启云同步（用明文密码注册云端账号）
   geSyncInit(p);
 }
-function authDoLogin(){
+async function authDoLogin(){
   var u=((document.getElementById('loginU')||{}).value||'').trim();
   var p=((document.getElementById('loginP')||{}).value||'');
   if(!u||!p){ toast('请输入账号和密码'); return; }
   var s = authLoad();
-  if(!s.users || !s.users[u]){ toast('账号不存在'); return; }
-  var rec = s.users[u];
-  if(rec.pw !== authHash(p, rec.salt||'')){ toast('密码错误'); return; }
-  s.current = u; authSave(s); authShow(); toast('登录成功');
-  seedEngIfEmpty();
-  // 自动开启云同步（token 已存则直接拉取，否则用明文密码登录云端）
-  geSyncInit(p);
+  // 1) 本机已有账号：本地校验（离线也可用）
+  if(s.users && s.users[u]){
+    var rec = s.users[u];
+    if(rec.pw !== authHash(p, rec.salt||'')){ toast('密码错误'); return; }
+    s.current = u; authSave(s); authShow(); toast('登录成功');
+    seedEngIfEmpty();
+    // 用密码尝试云端登录/注册并拉取（启用跨设备同步）
+    geSyncInit(p);
+    return;
+  }
+  // 2) 本机无此账号：尝试云端登录（跨设备，账号已在其他设备注册）
+  toast('正在连接云端验证…');
+  var cp = authHash('ge-cloud-salt|' + u, p);
+  var r = await _geFetchFn('/api/ge/login', { uid:u, pass:cp });
+  if(r && r.ok && r.token){
+    s.users = s.users || {};
+    var salt = Math.random().toString(36).slice(2,10);
+    s.users[u] = { pw:authHash(p, salt), salt:salt, role:(r.role==='admin'?'admin':'user'), createdAt:Date.now() };
+    s.current = u; authSave(s);
+    _currentUser = u; _currentRole = s.users[u].role;
+    authShow();
+    toast('登录成功（云端）');
+    seedEngIfEmpty();
+    try{ localStorage.setItem('ge_' + u + '_cloudtoken', r.token); }catch(e){}
+    _geCloud.token = r.token; _geCloud.uid = u; _geSetDot(1);
+    await gePull(); geRTConnect();
+    return;
+  }
+  // 云端也未通过：给出明确引导，避免“无反应”
+  if(r && r.ok===false){ toast('账号或密码错误'); }
+  else { toast('云端无此账号：请先在电脑端登录一次以启用云同步'); }
 }
 function authLogout(){
   if(!confirm('确定要登出吗？')) return;
@@ -1732,12 +1760,20 @@ function geNoteDirty(k){
   _geCloud.pushTimer = setTimeout(function(){ geSyncPush(false); }, 2500);
 }
 
+function _geCloudPassKey(){ return 'ge_' + _currentUser + '_cloudpass'; }
 async function geSyncInit(pass){
+  if(!_currentUser){ _geSetDot(0); return; }
+  var cp = pass ? _geCloudPass(pass) : '';
+  if(pass) toast('☁️ 云同步已开启');
+  return geSyncInitCp(cp);
+}
+// 用已算好的云端密码哈希 cp 登录/注册并拉取（会话恢复时可无水印自动启用同步）
+async function geSyncInitCp(cp){
   if(!_currentUser){ _geSetDot(0); return; }
   _geCloud.uid = _currentUser;
   var tok = localStorage.getItem(_geTokKey()) || '';
-  if(!tok && pass){
-    var cp = _geCloudPass(pass);
+  if(!tok && cp){
+    try{ localStorage.setItem(_geCloudPassKey(), cp); }catch(e){}  // 缓存云密码，供会话恢复自动同步
     // 先试登录，未注册则注册
     var r1 = await _geFetchFn('/api/ge/login', { uid:_currentUser, pass:cp });
     if(r1 && r1.ok && r1.token){ tok = r1.token; }
@@ -1753,7 +1789,6 @@ async function geSyncInit(pass){
   _geSetDot(1);
   await gePull();
   geRTConnect();
-  if(pass) toast('☁️ 云同步已开启');
 }
 
 async function _geFetchFn(path, body){
