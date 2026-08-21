@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<!-- v12: ①打开网页不再自动播英语（自动朗读只在翻卡/切换时触发）②中文/句子语音兜底改走 SCF /api/tts（有道不支持中文返回500，实测SCF返回audio/mpeg）→ 谁是卧底胜利、你比我猜正确/跳过/剩余X秒/时间到 均有声 (2026-08-21) -->
+<!-- v13: ①删除「测试声音」按钮 ②closeGm 清理你比我猜倒计时定时器（修复关闭游戏后后台报倒计时声）③中文语音改 SCF 优先+原生兜底（修复手机“有语音API但系统无TTS引擎→游戏中文语音静音”） (2026-08-21) -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>🎮 娱乐学习</title>
@@ -816,34 +816,6 @@ function _wavUri(freq, dur){
 function _htmlAudioPlay(uri, vol){
   try{ if(!uri) return; var a=new Audio(uri); if(vol!=null) a.volume=vol; var p=a.play(); if(p&&p.catch) p.catch(function(){}); }catch(e){}
 }
-/* ---- 声音自检：持久弹窗，逐项显示浏览器音频能力，便于定位 ---- */
-function testSound(){
-  var ac=_acx(), acOk=!!ac, acSt=ac?ac.state:'不可用';
-  var beepOk=false, ttsOk=null, htmlOk=false;
-  try{ _sfxBeep(880); beepOk=true; }catch(e){}
-  try{ _htmlAudioPlay(_wavUri(660,0.25),0.8); htmlOk=true; }catch(e){}
-  var tts=('speechSynthesis' in window);
-  if(tts){ try{ _speak('hello','en-US'); ttsOk=true; }catch(e){ ttsOk=false; } }
-  var ua=''; try{ ua=navigator.userAgent||''; if(ua.length>90) ua=ua.slice(0,90)+'…'; }catch(e){}
-  gm(
-    '<div class="gm-head"><div class="gm-title">🔊 声音自检</div><button class="gm-close" onclick="closeGm()">✕</button></div>'+
-    '<div style="font-size:14px;line-height:2">'+
-      '<div>• 网页音频 WebAudio：'+(acOk?(acSt==='running'?'✅ '+acSt:'⚠️ '+acSt):'❌ 不可用')+'</div>'+
-      '<div>• 音效播放：'+(beepOk?'✅ 已触发':'❌ 失败')+'</div>'+
-      '<div>• 语音合成 TTS：'+(tts?(ttsOk?'✅ 已触发':'⚠️ 已触发(听不到?)'):'❌ 不支持（已启用有道音频兜底）')+'</div>'+
-      '<div>• HTMLAudio 兜底：'+(htmlOk?'✅ 已触发':'❌ 失败')+'</div>'+
-      '<div style="font-size:12px;color:#888;word-break:break-all">• 浏览器：'+ua+'</div>'+
-    '</div>'+
-    '<p style="font-size:13px;color:#666;margin-top:12px;line-height:1.7">✅/已触发但仍无声 → 检查手机<b>媒体音量</b>（非铃声）、蓝牙耳机、静音模式；或用手机放段视频确认能否出声。<br>❌ 不支持 → 浏览器过旧/受限，请更新或换 Chrome 打开，或在电脑上使用。</p>'
-  );
-}
-try{
-  var _tb=document.createElement('div');
-  _tb.textContent='🔊 测试声音';
-  _tb.style.cssText='position:fixed;right:12px;bottom:70px;z-index:99990;background:#6C5CE7;color:#fff;font-size:11px;padding:7px 11px;border-radius:16px;box-shadow:0 2px 8px rgba(0,0,0,.25);cursor:pointer;opacity:.92';
-  _tb.onclick=function(){ testSound(); };
-  document.body.appendChild(_tb);
-}catch(e){}
 var _ydPlayer=null;
 function _playYoudao(txt, onFail){
   // 有道发音 <audio> 直连（仅英文单词有效；不依赖 speechSynthesis）
@@ -876,14 +848,13 @@ function _speak(text, lang){
   if(_sfxMuted || !text) return;
   lang=lang||'zh-CN';
   var hasNative=('speechSynthesis' in window);
-  if(!hasNative){
-    // 无语音合成：英语走有道（仅单词有效），中文/句子走 SCF TTS
-    if(lang==='en-US'){ _playYoudao(text, null); }
-    else { _playScfTts(text, null); }
+  if(lang==='en-US'){
+    // 英语：有道自然音质优先（无原生也可播），失败回退原生
+    _playYoudao(text, hasNative ? function(){ _speakNative(text,lang); } : null);
     return;
   }
-  if(lang==='en-US'){ _playYoudao(text, function(){ _speakNative(text,lang); }); return; }     // 英语优先自然音质，失败再走原生
-  _speakNative(text, lang);
+  // 中文/句子：SCF 音频优先（无 TTS 手机也能播；覆盖“有 speechSynthesis 但系统无 TTS 引擎→静音”的情况），失败回退原生
+  _playScfTts(text, hasNative ? function(){ _speakNative(text,lang); } : null);
 }
 function _speakNative(text, lang){
   if(!('speechSynthesis' in window) || !text) return;
@@ -916,7 +887,11 @@ function gm(html){
   var m=document.getElementById('gmMask'); if(!m){ m=document.createElement('div'); m.id='gmMask'; m.className='gm-mask'; m.onclick=function(e){ if(e.target===m) closeGm(); }; document.body.appendChild(m); }
   m.innerHTML='<div class="gm-box">'+html+'</div>'; m.classList.add('show');
 }
-function closeGm(){ var m=document.getElementById('gmMask'); if(m) m.classList.remove('show'); }
+function closeGm(){
+  var m=document.getElementById('gmMask'); if(m) m.classList.remove('show');
+  // 关闭弹窗必须清理游戏定时器，否则倒计时会在后台继续报语音
+  if(_cd && _cd.timer){ clearInterval(_cd.timer); _cd.timer=null; }
+}
 
 /* ===================== Tab 切换（外层：游戏 / 英语 两大分类） ===================== */
 var _engSub = 'words';
