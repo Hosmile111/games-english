@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<!-- v7: 修复移动端无声——多种手势持续 resume AudioContext/speechSynthesis（iOS/Android 自动播放策略）；_speak 先 cancel 再 speak 且不等voices (2026-08-21) -->
+<!-- v8: 移动端无声再加固——首次手势显示解锁诊断提示（确认新版/检查静音开关/浏览器支持）；unlockSpeech 先 cancel；_acx 更健壮 (2026-08-21) -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>🎮 娱乐学习</title>
@@ -724,7 +724,13 @@ function toast(msg){ var t=document.getElementById('toast'); if(!t) return; t.te
 
 /* ===================== 音频 / 语音（与工作台同款健壮方案） ===================== */
 var _ac=null, _sfxMuted=false;
-function _acx(){ if(!_ac){ try{ _ac=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ _ac=null; } } if(_ac && _ac.state==='suspended'){ _ac.resume(); } return _ac; }
+function _acx(){
+  if(!_ac){
+    try{ var AC=window.AudioContext||window.webkitAudioContext; if(AC) _ac=new AC(); }catch(e){ _ac=null; }
+  }
+  if(_ac && _ac.state==='suspended'){ try{ _ac.resume(); }catch(e){} }
+  return _ac;
+}
 var _zhVoices=[], _enVoices=[], _voicesReady=false;
 function _loadVoices(){
   if(!('speechSynthesis' in window)) return;
@@ -743,6 +749,7 @@ function unlockSpeech(){
   if(_sfxMuted || !('speechSynthesis' in window)) return;
   var ss=window.speechSynthesis;
   try{ ss.resume(); }catch(e){}
+  try{ ss.cancel(); }catch(e){}
   try{ var u=new SpeechSynthesisUtterance(' '); u.volume=0; u.rate=5; ss.speak(u); _speechUnlocked=true; }catch(e){}
   _ttsKeepAliveStart();
 }
@@ -766,7 +773,16 @@ if('speechSynthesis' in window){
 }
 // 移动端音频解锁：iOS/Android 要求在“用户手势内”创建并 resume AudioContext / speechSynthesis，
 // 且上下文会被系统反复挂起。故在多种手势上持续 resume（每次交互即唤醒），而非只解锁一次。
-function unlockAudio(){ _acx(); unlockSpeech(); }
+var _unlockNotified=false;
+function unlockAudio(){
+  var ac=_acx(); unlockSpeech();
+  if(!_unlockNotified){
+    _unlockNotified=true;
+    if(!ac){ toast('⚠️ 此浏览器不支持网页音频，请用 Safari/Chrome 打开'); }
+    else if(!('speechSynthesis' in window)){ toast('⚠️ 此浏览器不支持语音合成，请用 Safari/Chrome 打开'); }
+    else { toast('🔊 声音已解锁'); }
+  }
+}
 ['pointerdown','touchstart','mousedown','click','keydown'].forEach(function(ev){
   try{ window.addEventListener(ev, unlockAudio, {passive:true}); }catch(e){}
 });
