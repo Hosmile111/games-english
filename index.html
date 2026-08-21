@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<!-- v10: 声音自检升级为持久弹窗，逐项显示 WebAudio/音效/TTS/HTMLAudio/浏览器UA，便于精确定位无声环节 (2026-08-21) -->
+<!-- v11: 英语发音移植工作台同款「有道 <audio> 直连」兜底——不再依赖 speechSynthesis，无语音合成的手机浏览器也能发音；游戏音效由 v9/v10 手势解锁修复 (2026-08-21) -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>🎮 娱乐学习</title>
@@ -830,7 +830,7 @@ function testSound(){
     '<div style="font-size:14px;line-height:2">'+
       '<div>• 网页音频 WebAudio：'+(acOk?(acSt==='running'?'✅ '+acSt:'⚠️ '+acSt):'❌ 不可用')+'</div>'+
       '<div>• 音效播放：'+(beepOk?'✅ 已触发':'❌ 失败')+'</div>'+
-      '<div>• 语音合成 TTS：'+(tts?(ttsOk?'✅ 已触发':'⚠️ 已触发(听不到?)'):'❌ 不支持')+'</div>'+
+      '<div>• 语音合成 TTS：'+(tts?(ttsOk?'✅ 已触发':'⚠️ 已触发(听不到?)'):'❌ 不支持（已启用有道音频兜底）')+'</div>'+
       '<div>• HTMLAudio 兜底：'+(htmlOk?'✅ 已触发':'❌ 失败')+'</div>'+
       '<div style="font-size:12px;color:#888;word-break:break-all">• 浏览器：'+ua+'</div>'+
     '</div>'+
@@ -844,8 +844,30 @@ try{
   _tb.onclick=function(){ testSound(); };
   document.body.appendChild(_tb);
 }catch(e){}
+var _ydPlayer=null;
+function _playYoudao(txt, onFail){
+  // 有道发音 <audio> 直连（不依赖 speechSynthesis，兼容无语音合成的手机浏览器/WebView）
+  try{
+    var yd='https://dict.youdao.com/dictvoice?audio='+encodeURIComponent(txt)+'&type=2';
+    if(!_ydPlayer){ _ydPlayer=new Audio(); }
+    try{ _ydPlayer.pause(); }catch(e){}
+    if(_ydPlayer.src===yd){ try{ _ydPlayer.currentTime=0; }catch(e){} }
+    else{ _ydPlayer.src=yd; }
+    var p=_ydPlayer.play();
+    if(p && p.catch){ p.catch(function(){ if(onFail) onFail(); }); }
+    else if(!p && onFail){ onFail(); }
+  }catch(e){ if(onFail) onFail(); }
+}
 function _speak(text, lang){
-  if(_sfxMuted || !('speechSynthesis' in window) || !text) return;
+  if(_sfxMuted || !text) return;
+  lang=lang||'zh-CN';
+  var hasNative=('speechSynthesis' in window);
+  if(!hasNative){ _playYoudao(text, null); return; }                                          // 无语音合成 → 有道音频兜底
+  if(lang==='en-US'){ _playYoudao(text, function(){ _speakNative(text,lang); }); return; }     // 英语优先自然音质，失败再走原生
+  _speakNative(text, lang);
+}
+function _speakNative(text, lang){
+  if(!('speechSynthesis' in window) || !text) return;
   var ss=window.speechSynthesis;
   try{ ss.resume(); }catch(e){}
   if(!_voicesReady){ _loadVoices(); }
