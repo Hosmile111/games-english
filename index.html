@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<!-- v8: 移动端无声加固——微信内置浏览器一次性提示（用浏览器打开）；首次手势解锁诊断提示；unlockSpeech 先 cancel；_acx 更健壮 (2026-08-21) -->
+<!-- v9: 移动端无声深度修复——HTMLAudio WAV 兜底发声 + 首手势双通道解锁 + 「🔊 测试声音」自检按钮（含 WebAudio 状态/音效/语音三合一诊断）(2026-08-21) -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>🎮 娱乐学习</title>
@@ -776,11 +776,12 @@ if('speechSynthesis' in window){
 var _unlockNotified=false;
 function unlockAudio(){
   var ac=_acx(); unlockSpeech();
+  _htmlAudioPlay(_wavUri(0,0.05),0.001); // 手势内用 HTMLAudio 静音“踢”一次，放行音频输出（部分安卓 WebView 需要）
   if(!_unlockNotified){
     _unlockNotified=true;
-    if(!ac){ toast('⚠️ 此浏览器不支持网页音频，请用 Safari/Chrome 打开'); }
-    else if(!('speechSynthesis' in window)){ toast('⚠️ 此浏览器不支持语音合成，请用 Safari/Chrome 打开'); }
-    else { toast('🔊 声音已解锁'); }
+    if(!ac){ toast('⚠️ 此浏览器不支持网页音频，请用 Chrome/系统浏览器打开'); }
+    else if(!('speechSynthesis' in window)){ toast('⚠️ 此浏览器不支持语音合成，请用 Chrome/系统浏览器打开'); }
+    else { toast('🔊 声音已解锁（WebAudio:'+ac.state+'）'); }
   }
 }
 ['pointerdown','touchstart','mousedown','click','keydown'].forEach(function(ev){
@@ -797,6 +798,41 @@ try{
     document.body.appendChild(_b);
   }
 }catch(e){}
+/* ---- WAV 生成 + HTMLAudio 兜底（Web Audio 不可用时仍能发声；部分 WebView 需 HTMLAudio 解锁） ---- */
+function _wavUri(freq, dur){
+  try{
+    var sr=8000, n=Math.floor(sr*(dur||0.18)), buf=new ArrayBuffer(44+n*2), d=new DataView(buf);
+    function w(o,s){ for(var i=0;i<s.length;i++) d.setUint8(o+i,s.charCodeAt(i)); }
+    w(0,'RIFF'); d.setUint32(4,36+n*2,true); w(8,'WAVE'); w(12,'fmt ');
+    d.setUint32(16,16,true); d.setUint16(20,1,true); d.setUint16(22,1,true);
+    d.setUint32(24,sr,true); d.setUint32(28,sr*2,true); d.setUint16(32,2,true); d.setUint16(34,16,true);
+    w(36,'data'); d.setUint32(40,n*2,true);
+    for(var i=0;i<n;i++){ var v=freq?Math.sin(2*Math.PI*freq*i/sr)*0.3*(1-i/n):0; d.setInt16(44+i*2,Math.round(v*32767),true); }
+    var bytes=new Uint8Array(buf), s='', ch=0x8000;
+    for(var i=0;i<bytes.length;i+=ch){ s+=String.fromCharCode.apply(null,bytes.subarray(i,i+ch)); }
+    return 'data:audio/wav;base64,'+btoa(s);
+  }catch(e){ return null; }
+}
+function _htmlAudioPlay(uri, vol){
+  try{ if(!uri) return; var a=new Audio(uri); if(vol!=null) a.volume=vol; var p=a.play(); if(p&&p.catch) p.catch(function(){}); }catch(e){}
+}
+/* ---- 声音自检按钮：直观告诉用户音效/语音是否可播，哪个环节断 ---- */
+function testSound(){
+  var ac=_acx(), st=ac?ac.state:'不可用', msgs=['🔊 WebAudio:'+st];
+  try{ _sfxBeep(880); msgs.push('音效✓'); }catch(e){ msgs.push('音效✗'); }
+  if('speechSynthesis' in window){ try{ _speak('hello','en-US'); msgs.push('语音✓'); }catch(e){ msgs.push('语音✗'); } }
+  else { msgs.push('语音:不支持'); }
+  toast(msgs.join(' | '));
+  // 额外尝试 HTMLAudio 发声，覆盖 Web Audio 被拦的场景
+  _htmlAudioPlay(_wavUri(880,0.2),0.8);
+}
+try{
+  var _tb=document.createElement('div');
+  _tb.textContent='🔊 测试声音';
+  _tb.style.cssText='position:fixed;right:12px;bottom:70px;z-index:99990;background:#6C5CE7;color:#fff;font-size:11px;padding:7px 11px;border-radius:16px;box-shadow:0 2px 8px rgba(0,0,0,.25);cursor:pointer;opacity:.92';
+  _tb.onclick=function(){ testSound(); };
+  document.body.appendChild(_tb);
+}catch(e){}
 function _speak(text, lang){
   if(_sfxMuted || !('speechSynthesis' in window) || !text) return;
   var ss=window.speechSynthesis;
@@ -811,13 +847,13 @@ function _speak(text, lang){
   ss.speak(u);
 }
 function _sfxExplode(){
-  var ac=_acx(); if(!ac) return;
+  var ac=_acx(); if(!ac){ _htmlAudioPlay(_wavUri(220,0.5),0.8); return; }
   var dur=0.6, buf=ac.createBuffer(1,Math.floor(ac.sampleRate*dur),ac.sampleRate), data=buf.getChannelData(0);
   for(var i=0;i<data.length;i++){ var t=i/data.length, env=Math.exp(-t*5); data[i]=(Math.random()*2-1)*0.7*env + Math.sin(2*Math.PI*60*t)*0.5*env; }
   var src=ac.createBufferSource(); src.buffer=buf; var g=ac.createGain(); g.gain.value=0.9; src.connect(g); g.connect(ac.destination); src.start();
 }
 function _sfxBeep(freq){
-  var ac=_acx(); if(!ac) return;
+  var ac=_acx(); if(!ac){ _htmlAudioPlay(_wavUri(freq||1000,0.18),0.8); return; }
   var dur=0.18, osc=ac.createOscillator(); osc.type='sine'; osc.frequency.value=freq||1000;
   var g=ac.createGain(); g.gain.setValueAtTime(0,ac.currentTime); g.gain.linearRampToValueAtTime(0.7,ac.currentTime+0.005); g.gain.exponentialRampToValueAtTime(0.0001,ac.currentTime+dur);
   osc.connect(g); g.connect(ac.destination); osc.start(); osc.stop(ac.currentTime+dur+0.02);
